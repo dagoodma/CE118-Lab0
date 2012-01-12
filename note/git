@@ -1,0 +1,14 @@
+To commit code to the github first be sure your SSH public key is
+generated in .ssh and added to your github account.
+
+## See the changes files
+git status -s
+
+## Add changed files
+git add -A
+
+## Commit to local repository
+git commit -a -m "Your message"
+
+## Commit to github (be sure to see http://help.github.com/create-a-repo/)
+git push -u origin master
