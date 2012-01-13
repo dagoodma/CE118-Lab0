@@ -13,15 +13,16 @@
 // --- Light Constants ---
 #define DARK_THRESHOLD 500
 #define LIGHT_THRESHOLD 400
-#define SEARCH_THRESHOLD 2
+#define SEARCH_THRESHOLD 2  // unused
 #define RUN_THRESHOLD 50
 
 // --- Timer Constants ---
 #define MOVEMENT_TIMER 1
 // times in milliseconds
 #define REVERSE_COLLIDE_TIME 850
-#define TURN_COLLIDE_TIME 150
-#define FORWARD_CHECK_TIME 11000
+#define TURN_COLLIDE_TIME 500
+#define FORWARD_CHECK_TIME 3000
+#define TURN_ALOT_COLLIDE_TIME 1000
 
 // --- Type Definitions ---
 #ifndef uint16
@@ -41,7 +42,9 @@ static enum {resting, running, find_low_light, find_min_light, turning} state;
 
 // --- Prototypes (documented at bottom)---
 void TurnRight();
+void BackupTurnRight();
 void TurnLeft();
+void BackupTurnLeft();
 void MoveBackward();
 void MoveForward();
 unsigned char IsDark ();
@@ -49,9 +52,11 @@ void UpdateLightLevels();
 void StartRunning();
 void StartResting();
 void ChangeDirection();
+void ChangeDirectionAlot();
 void RightBumperCollision();
 void LeftBumperCollision();
 void FrontBumpersCollision();
+unsigned char CoinFlip();
 
 
 int main(void) {
@@ -92,11 +97,11 @@ int main(void) {
                     FrontBumpersCollision();
                     printf("\nFront bumper hit");
                 } else if (CurLight < (RefLight - RUN_THRESHOLD)) {
-                    // Change directions when we're not making progress
-                    ChangeDirection();
+                    // Change directions ALOT when it is getting brighter
+                    ChangeDirectionAlot();
                 } else if (IsTimerExpired(MOVEMENT_TIMER)
                         && !(CurLight > RefLight + RUN_THRESHOLD)) {
-                    // what does this do???
+                    // Change directions when no progress has been made
                     // note: ChangeDirection will reInit and clear timer-
                     ChangeDirection();
                 }
@@ -124,9 +129,20 @@ int main(void) {
  * @remark Turns the roach gradually to the right.
  */
 void TurnRight() {
-    RightMtrSpeed(-5);
+    RightMtrSpeed(0);
     LeftMtrSpeed(5);
 }
+
+/**
+ * Function: BackupTurnRight
+ * @return None
+ * @remark Backup and turns the roach to the right.
+ */
+void BackupTurnRight() {
+    RightMtrSpeed(-5);
+    LeftMtrSpeed(2);
+}
+
 
 /**
  * Function: TurnLeft
@@ -135,8 +151,18 @@ void TurnRight() {
  */
 void TurnLeft() {
     RightMtrSpeed(5);
+    LeftMtrSpeed(0);
+}
+/**
+ * Function: BackupTurnLeft
+ * @return None
+ * @remark Backup and turns the roach to the left.
+ */
+void BackupTurnLeft() {
+    RightMtrSpeed(2);
     LeftMtrSpeed(-5);
 }
+
 
 /**
  * Function: MoveBackward
@@ -145,7 +171,7 @@ void TurnLeft() {
  */
 void MoveBackward() {
     LeftMtrSpeed(-10);
-    RightMtrSpeed(-10);
+    RightMtrSpeed(-8);
 }
 
 /**
@@ -164,7 +190,7 @@ void MoveForward() {
  * @remark Puts the roach into the turning state and turns left. */
 void RightBumperCollision() {
     state = turning;
-    TurnLeft();
+    BackupTurnLeft();
     // stop turning after timer expires
     InitTimer(MOVEMENT_TIMER, TURN_COLLIDE_TIME);
 }
@@ -175,7 +201,7 @@ void RightBumperCollision() {
  * @remark Puts the roach into the turning state and turns right. */
 void LeftBumperCollision() {
     state = turning;
-    TurnLeft();
+    BackupTurnRight();
     // stop turning after timer expires
     InitTimer(MOVEMENT_TIMER, TURN_COLLIDE_TIME);
 }
@@ -229,8 +255,7 @@ void StartResting() {
  */
 void ChangeDirection() {
     state = turning;
-    // TODO Look into a cleaner way to be random
-    if (GetTime() % 3) {
+    if (CoinFlip()) {
         TurnLeft();
     } else {
         TurnRight();
@@ -238,6 +263,24 @@ void ChangeDirection() {
     // stop turning when timer expires
     InitTimer(MOVEMENT_TIMER, TURN_COLLIDE_TIME);
 }
+
+/**
+ * Function: ChangeDirectionAlot
+ * @return None
+ * @remark Puts the roach into the turning state and causes it to turn
+ *    in a random direction more than just ChangDirection
+ */
+void ChangeDirectionAlot() {
+    state = turning;
+    if (CoinFlip()) {
+        TurnLeft();
+    } else {
+        TurnRight();
+    }
+    // stop turning when timer expires
+    InitTimer(MOVEMENT_TIMER, TURN_ALOT_COLLIDE_TIME);
+}
+
 
 /**
  * Function: IsDark
@@ -268,4 +311,14 @@ void UpdateLightLevels() {
     CurLight = LightLevel();
 }
 
-
+/**
+ * Function: CoinFlip
+ * @return TRUE or FALSE
+ * @remark This is a pseudo random number generator
+ * TO DO: Make this cleaner
+ */
+unsigned char CoinFlip() {
+    int t1 = GetTime() % 1001;
+    int t2 = GetTime() % 999;
+    return (t1*t2) % 2;
+}
