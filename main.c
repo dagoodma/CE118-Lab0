@@ -18,11 +18,18 @@
 
 // --- Timer Constants ---
 #define MOVEMENT_TIMER 1
+#define RAMP_TIMER 2
 // times in milliseconds
-#define REVERSE_COLLIDE_TIME 850
-#define TURN_COLLIDE_TIME 500
-#define FORWARD_CHECK_TIME 3000
-#define TURN_ALOT_COLLIDE_TIME 1000
+#define REVERSE_COLLIDE_TIME 600 // backing up time
+#define CHANGE_DIR_TIME 1000 // random dir. turn time
+#define CHANGE_DIR_PREV_TIME 1500 // collision turn tume
+#define FORWARD_CHECK_TIME 4000 // bordem time
+#define TURN_ALOT_TIME 1500 // bordem, turning time
+#define RAMP_SPEED 100 // ramp up the motors at interval
+
+// -- OTHER DEFINES
+#define LEFT 1
+#define RIGHT 0
 
 // --- Type Definitions ---
 #ifndef uint16
@@ -37,8 +44,12 @@
 static uint16 PrevLight;
 static uint16 CurLight;
 static uint16 RefLight;
-static int count;
-static enum {resting, running, find_low_light, find_min_light, turning} state;
+static uint8 NextDirection;
+static int8 CurSpeedLeft;
+static int8 CurSpeedRight;
+static int8 TargetSpeedLeft;
+static int8 TargetSpeedRight;
+static enum {resting, running, reversing, turning} state;
 
 // --- Prototypes (documented at bottom)---
 void TurnRight();
@@ -52,11 +63,18 @@ void UpdateLightLevels();
 void StartRunning();
 void StartResting();
 void ChangeDirection();
+void ChangeDirectionRand();
+void ChangeDirectionPrev();
 void ChangeDirectionAlot();
 void RightBumperCollision();
 void LeftBumperCollision();
 void FrontBumpersCollision();
 unsigned char CoinFlip();
+void UpdateMotors();
+void SetMotors(int8 LeftSpeed, int8 RightSpeed);
+void RampMotorsTo();
+void DoRamp();
+void StopMotors();
 
 
 int main(void) {
@@ -64,6 +82,14 @@ int main(void) {
     TIMERS_Init();
     Roach_Init();
     state = resting;
+    NextDirection = LEFT;
+    CurSpeedLeft = 0;
+    CurSpeedRight = 0;
+    TargetSpeedLeft = 0;
+    TargetSpeedRight = 0;
+
+    InitTimer(RAMP_TIMER, RAMP_SPEED);
+    
     printf("\nHello Roach!");
     // --------------------- Main Loop --------------------
     while (1) {
@@ -102,8 +128,8 @@ int main(void) {
                 } else if (IsTimerExpired(MOVEMENT_TIMER)
                         && !(CurLight > RefLight + RUN_THRESHOLD)) {
                     // Change directions when no progress has been made
-                    // note: ChangeDirection will reInit and clear timer-
-                    ChangeDirection();
+                    //      (getting bored)
+                    ChangeDirectionRand();
                 }
             }
         } else if (state == turning) {
@@ -113,6 +139,16 @@ int main(void) {
                 printf("\nDone turning, start running");
                 StartRunning();
             }
+        } else if (state == reversing) {
+            // --- Reversing State ---
+            printf("\nState = Reversing");
+            if (IsTimerExpired(MOVEMENT_TIMER)) {
+                printf("\nDone reversing, start turning");
+                ChangeDirectionPrev();
+            }
+        }
+        if (IsTimerExpired(RAMP_TIMER)) {
+            DoRamp();
         }
             
         // note: don't remove this!
@@ -124,23 +160,87 @@ int main(void) {
 // ------------------Functions ------------------
 
 /**
+ * Function: RampMotorTo
+ * @param LeftTarget, to start ramping the left motor to
+ * @param RightSpeed, to start ramping the right motor to
+ * @return None
+ * @remark Sets the motor speeds to the given speeds without ramping.
+ */
+void RampMotorTo(int8 LeftTarget, int8 RightTarget) {
+    TargetSpeedLeft = LeftTarget;
+    TargetSpeedRight = RightTarget;
+}
+
+/**
+ * Function: DoRamp
+ * @return None
+ * @remark Ramps the motor speeds towards their target values
+ *    incrementally.
+ */
+void DoRamp() {
+    // Ramp up/down the left motor
+    if (TargetSpeedLeft > CurSpeedLeft) {
+        CurSpeedLeft++;
+    } else if (TargetSpeedLeft < CurSpeedLeft) {
+        CurSpeedLeft--;
+    }
+
+    // Ramp up/down the right motor
+    if (TargetSpeedRight > CurSpeedRight) {
+        CurSpeedRight++;
+    } else if (TargetSpeedRight < CurSpeedRight) {
+        CurSpeedRight--;
+    }
+
+    UpdateMotors();
+    InitTimer(RAMP_TIMER, RAMP_SPEED);
+}
+
+/**
+ * Function: SetMotors
+ * @param LeftSpeed, speed to set the left motor to
+ * @param RightSpeed, speed to set the right motor to
+ * @return None
+ * @remark Sets the motor speeds to the given speeds without ramping.
+ */
+void SetMotors(int8 LeftSpeed, int8 RightSpeed) {
+    CurSpeedRight = RightSpeed;
+    TargetSpeedRight = RightSpeed;
+    CurSpeedLeft = LeftSpeed;
+    TargetSpeedLeft = LeftSpeed;
+    UpdateMotors();
+}
+
+/**
+ * Function: UpdateMotors
+ * @return None
+ * @remark Updates the motor speeds to the current speeds.
+ */
+void UpdateMotors() {
+    RightMtrSpeed(CurSpeedRight);
+    LeftMtrSpeed(CurSpeedLeft);
+}
+
+/**
+ * Function: StopMotors
+ * @return None
+ * @remark Stops the roach from moving (and ramping).
+ */
+void StopMotors() {
+    CurSpeedRight = 0;
+    TargetSpeedRight = 0;
+    CurSpeedLeft = 0;
+    TargetSpeedLeft = 0;
+    UpdateMotors();
+}
+
+/**
  * Function: TurnRight
  * @return None
  * @remark Turns the roach gradually to the right.
  */
 void TurnRight() {
-    RightMtrSpeed(0);
-    LeftMtrSpeed(5);
-}
-
-/**
- * Function: BackupTurnRight
- * @return None
- * @remark Backup and turns the roach to the right.
- */
-void BackupTurnRight() {
-    RightMtrSpeed(-5);
-    LeftMtrSpeed(2);
+    RampMotorTo(5,0);
 }
 
 
@@ -150,17 +250,7 @@ void BackupTurnRight() {
  * @remark Turns the roach gradually to the left.
  */
 void TurnLeft() {
-    RightMtrSpeed(5);
-    LeftMtrSpeed(0);
-}
-/**
- * Function: BackupTurnLeft
- * @return None
- * @remark Backup and turns the roach to the left.
- */
-void BackupTurnLeft() {
-    RightMtrSpeed(2);
-    LeftMtrSpeed(-5);
+    RampMotorTo(0,5);
 }
 
 
@@ -170,8 +260,7 @@ void BackupTurnLeft() {
  * @remark Moves the roach backward.
  */
 void MoveBackward() {
-    LeftMtrSpeed(-10);
-    RightMtrSpeed(-8);
+    SetMotors(-10,-10);
 }
 
 /**
@@ -180,8 +269,7 @@ void MoveBackward() {
  * @remark Moves the roach forward.
  */
 void MoveForward() {
-    LeftMtrSpeed(10);
-    RightMtrSpeed(10);
+    RampMotorTo(10,10);
 }
 
 /**
@@ -189,10 +277,12 @@ void MoveForward() {
  * @return None
  * @remark Puts the roach into the turning state and turns left. */
 void RightBumperCollision() {
-    state = turning;
-    BackupTurnLeft();
+    state = reversing;
+    StopMotors();
+    NextDirection = LEFT;
+    MoveBackward();
     // stop turning after timer expires
-    InitTimer(MOVEMENT_TIMER, TURN_COLLIDE_TIME);
+    InitTimer(MOVEMENT_TIMER, REVERSE_COLLIDE_TIME);
 }
 
 /**
@@ -200,10 +290,12 @@ void RightBumperCollision() {
  * @return None
  * @remark Puts the roach into the turning state and turns right. */
 void LeftBumperCollision() {
-    state = turning;
-    BackupTurnRight();
+    state = reversing;
+    StopMotors();
+    NextDirection = RIGHT;
+    MoveBackward();
     // stop turning after timer expires
-    InitTimer(MOVEMENT_TIMER, TURN_COLLIDE_TIME);
+    InitTimer(MOVEMENT_TIMER, REVERSE_COLLIDE_TIME);
 }
 
 /**
@@ -212,7 +304,8 @@ void LeftBumperCollision() {
  * @remark Puts the roach into the turn state and causes it to move
  *    backward. */
 void FrontBumpersCollision() {
-    state = turning;
+    state = reversing;
+    StopMotors();
     MoveBackward();
     // stop backing up when timer expires
     InitTimer(MOVEMENT_TIMER, REVERSE_COLLIDE_TIME);
@@ -228,8 +321,7 @@ void StartRunning() {
     state = running;
     // set a reference light level to check against later
     RefLight = CurLight;
-    RightMtrSpeed(10);
-    LeftMtrSpeed(10);
+    MoveForward();
     // check the reference light level when timer expires
     // and changes directions if it's getting brighter
     InitTimer(MOVEMENT_TIMER, FORWARD_CHECK_TIME);
@@ -243,17 +335,16 @@ void StartRunning() {
  */
 void StartResting() {
     state = resting;
-    RightMtrSpeed(0);
-    LeftMtrSpeed(0);
+    StopMotors();
 }
 
 /**
- * Function: ChangeDirection
+ * Function: ChangeDirectionRand
  * @return None
  * @remark Puts the roach into the turning state and causes it to turn
  *    in a random direction.
  */
-void ChangeDirection() {
+void ChangeDirectionRand() {
     state = turning;
     if (CoinFlip()) {
         TurnLeft();
@@ -261,7 +352,23 @@ void ChangeDirection() {
         TurnRight();
     }
     // stop turning when timer expires
-    InitTimer(MOVEMENT_TIMER, TURN_COLLIDE_TIME);
+    InitTimer(MOVEMENT_TIMER, CHANGE_DIR_TIME);
+}
+/**
+ * Function: ChangeDirection
+ * @return None
+ * @remark Puts the roach into the turning state and causes it to turn
+ *    in a random direction.
+ */
+void ChangeDirectionPrev() {
+    state = turning;
+    if (NextDirection == LEFT) {
+        TurnLeft();
+    } else {
+        TurnRight();
+    }
+    // stop turning when timer expires
+    InitTimer(MOVEMENT_TIMER, CHANGE_DIR_PREV_TIME);
 }
 
 /**
@@ -278,7 +385,7 @@ void ChangeDirectionAlot() {
         TurnRight();
     }
     // stop turning when timer expires
-    InitTimer(MOVEMENT_TIMER, TURN_ALOT_COLLIDE_TIME);
+    InitTimer(MOVEMENT_TIMER, TURN_ALOT_TIME);
 }
 
 

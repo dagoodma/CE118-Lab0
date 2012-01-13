@@ -10,9 +10,9 @@ CND_CONF=default
 CND_DISTDIR=dist
 TMPDIR=build/${CND_CONF}/${IMAGE_TYPE}/tmp-packaging
 TMPDIRNAME=tmp-packaging
-OUTPUT_PATH=dist/${CND_CONF}/${IMAGE_TYPE}/Lab0_RoachTest.X.${IMAGE_TYPE}.elf
-OUTPUT_BASENAME=Lab0_RoachTest.X.${IMAGE_TYPE}.elf
-PACKAGE_TOP_DIR=lab0roachtest.x/
+OUTPUT_PATH=dist/${CND_CONF}/${IMAGE_TYPE}/dagoodma-CE118-Lab0-b720ad5.${IMAGE_TYPE}.elf
+OUTPUT_BASENAME=dagoodma-CE118-Lab0-b720ad5.${IMAGE_TYPE}.elf
+PACKAGE_TOP_DIR=dagoodma-ce118-lab0-b720ad5/
 
 # Functions
 function checkReturnCode
@@ -57,15 +57,15 @@ mkdir -p ${TMPDIR}
 
 # Copy files and create directories and links
 cd "${TOP}"
-makeDirectory ${TMPDIR}/lab0roachtest.x/bin
+makeDirectory ${TMPDIR}/dagoodma-ce118-lab0-b720ad5/bin
 copyFileToTmpDir "${OUTPUT_PATH}" "${TMPDIR}/${PACKAGE_TOP_DIR}bin/${OUTPUT_BASENAME}" 0755
 
 
 # Generate tar file
 cd "${TOP}"
-rm -f ${CND_DISTDIR}/${CND_CONF}/package/lab0roachtest.x.tar
+rm -f ${CND_DISTDIR}/${CND_CONF}/package/dagoodma-ce118-lab0-b720ad5.tar
 cd ${TMPDIR}
-tar -vcf ../../../../${CND_DISTDIR}/${CND_CONF}/package/lab0roachtest.x.tar *
+tar -vcf ../../../../${CND_DISTDIR}/${CND_CONF}/package/dagoodma-ce118-lab0-b720ad5.tar *
 checkReturnCode
 
 # Cleanup

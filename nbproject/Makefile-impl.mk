@@ -24,7 +24,7 @@ CLEAN_SUBPROJECTS=${CLEAN_SUBPROJECTS_${SUBPROJECTS}}
 
 
 # Project Name
-PROJECTNAME=Lab0_RoachTest.X
+PROJECTNAME=dagoodma-CE118-Lab0-b720ad5
 
 # Active Configuration
 DEFAULTCONF=default
