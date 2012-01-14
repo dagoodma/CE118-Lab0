@@ -2,7 +2,7 @@
  * File:   main.c
  * Author: dagoodma
  *
- * Created on January 11, 2012, 2:17 PM
+ * Created on January 13, 2012, 2:17 PM
  */
 
 #include <p32xxxx.h>
@@ -11,21 +11,19 @@
 #include <timers.h>
 
 // --- Light Constants ---
-#define DARK_THRESHOLD 500
+#define DARK_THRESHOLD 520
 #define LIGHT_THRESHOLD 400
-#define SEARCH_THRESHOLD 2  // unused
-#define RUN_THRESHOLD 50
+#define RAMP_UP_DISTANCE 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10
 
 // --- Timer Constants ---
-#define MOVEMENT_TIMER 1
+#define UNIT_TIMER 1
 #define RAMP_TIMER 2
+#define MOVEMENT_TIMER 3
 // times in milliseconds
-#define REVERSE_COLLIDE_TIME 600 // backing up time
-#define CHANGE_DIR_TIME 1000 // random dir. turn time
-#define CHANGE_DIR_PREV_TIME 1500 // collision turn tume
-#define FORWARD_CHECK_TIME 4000 // bordem time
+#define UNIT_TIME 100 // length of unit interval
+#define RAMP_TIME 100 // ramp up the motors at interval
 #define TURN_ALOT_TIME 1500 // bordem, turning time
-#define RAMP_SPEED 100 // ramp up the motors at interval
+
 
 // -- OTHER DEFINES
 #define LEFT 1
@@ -41,15 +39,17 @@
 #endif
 
 // --- Global Variables ---
-static uint16 PrevLight;
+static int Distance;
+//static uint16 PrevLight;
 static uint16 CurLight;
-static uint16 RefLight;
+static uint16 DarkestLight;
+//static uint16 RefLight;
 static uint8 NextDirection;
 static int8 CurSpeedLeft;
 static int8 CurSpeedRight;
 static int8 TargetSpeedLeft;
 static int8 TargetSpeedRight;
-static enum {resting, running, reversing, turning} state;
+static enum {resting, searching, returning, turning} state;
 
 // --- Prototypes (documented at bottom)---
 void TurnRight();
@@ -62,6 +62,9 @@ unsigned char IsDark ();
 void UpdateLightLevels();
 void StartRunning();
 void StartResting();
+void StartSearching();
+void StartReturning();
+void UpdateDistance();
 void ChangeDirection();
 void ChangeDirectionRand();
 void ChangeDirectionPrev();
@@ -72,8 +75,9 @@ void FrontBumpersCollision();
 unsigned char CoinFlip();
 void UpdateMotors();
 void SetMotors(int8 LeftSpeed, int8 RightSpeed);
-void RampMotorsTo();
+void RampMotorsTo(int8 LeftSpeed, int8 RightSpeed);
 void DoRamp();
+unsigned char Ramping();
 void StopMotors();
 
 
@@ -82,13 +86,12 @@ int main(void) {
     TIMERS_Init();
     Roach_Init();
     state = resting;
-    NextDirection = LEFT;
+    //NextDirection = LEFT;
     CurSpeedLeft = 0;
     CurSpeedRight = 0;
     TargetSpeedLeft = 0;
     TargetSpeedRight = 0;
-
-    InitTimer(RAMP_TIMER, RAMP_SPEED);
+    DarkestLight = 0;
     
     printf("\nHello Roach!");
     // --------------------- Main Loop --------------------
@@ -96,57 +99,59 @@ int main(void) {
         UpdateLightLevels();
         printf("\nLight level: %4d Bumpers: 0x%x", CurLight, ReadBumpers());
 
-        if (state == resting) {
-            // --- Resting State ---
-            printf("\nState = Resting");
-            if (IsDark()) {
-                printf("\nDark, Continue resting...");
-            } else {
-                printf("\nLight, RUNNN!!!!");
-                StartRunning();
-            }
-        } else if (state == running) {
-            // --- Running State ---
-            printf("\nState = Running");
-            if (IsDark()) {
-                printf("\nDark, start resting!!!");
-                StartResting();
-            } else {
-                printf("\nLight, continue running....");
-                if (ReadFrontLeftBumper() && !ReadFrontRightBumper()) {
-                    LeftBumperCollision();
-                    printf("\nLeft bumper hit");
-                } else if (ReadFrontRightBumper() && !ReadFrontLeftBumper()) {
-                    RightBumperCollision();
-                    printf("\nRight bumper hit");
-                } else if (ReadFrontRightBumper() && ReadFrontLeftBumper()) {
-                    FrontBumpersCollision();
-                    printf("\nFront bumper hit");
-                } else if (CurLight < (RefLight - RUN_THRESHOLD)) {
-                    // Change directions ALOT when it is getting brighter
-                    ChangeDirectionAlot();
-                } else if (IsTimerExpired(MOVEMENT_TIMER)
-                        && !(CurLight > RefLight + RUN_THRESHOLD)) {
-                    // Change directions when no progress has been made
-                    //      (getting bored)
-                    ChangeDirectionRand();
+        switch(state) {
+            case resting:
+                // --- Resting State ---
+                printf("\nState = Resting");
+                if (IsDark()) {
+                    printf("\nDark, Continue resting...");
+                } else {
+                    printf("\nLight, RUNNN!!!!");
+                    StartSearching();
                 }
-            }
-        } else if (state == turning) {
-            // --- Turning State ---
-            printf("\nState = Turning");
-            if (IsTimerExpired(MOVEMENT_TIMER)) {
-                printf("\nDone turning, start running");
-                StartRunning();
-            }
-        } else if (state == reversing) {
-            // --- Reversing State ---
-            printf("\nState = Reversing");
-            if (IsTimerExpired(MOVEMENT_TIMER)) {
-                printf("\nDone reversing, start turning");
-                ChangeDirectionPrev();
-            }
+            case searching:
+                if (IsDark()) {
+                    StartResting();
+                }
+                if (IsTimerExpired(UNIT_TIMER)) {
+                    UpdateLightLevels();
+                    if (CurLight >= DarkestLight) {
+                        // Found the darkest spot in search
+                        DarkestLight = CurLight;
+                        Distance = 0;
+                    }
+                    UpdateDistance();
+                    InitTimer(UNIT_TIMER, UNIT_TIME);
+                }
+                if (ReadFrontLeftBumper() || ReadFrontRightBumper()) {
+                    StartReturning();
+                }
+                break;
+            case (returning):
+                if (IsTimerExpired(UNIT_TIMER)) {
+                    UpdateDistance();
+
+                    if (Distance <= 0) {
+                        RampMotorsTo(0,0);
+                        if (!Ramping()) {
+                            ChangeDirectionAlot();
+                        }
+                    }
+                    InitTimer(UNIT_TIMER, UNIT_TIME);
+                }
+                break;
+            case turning:
+                // --- Turning State ---
+                printf("\nState = Turning");
+                if (IsTimerExpired(MOVEMENT_TIMER)) {
+                    printf("\nDone turning, start running");
+                    //if (MODE == searching)
+                    StartSearching();
+                }
+                break;
         }
+
+
         if (IsTimerExpired(RAMP_TIMER)) {
             DoRamp();
         }
@@ -160,15 +165,16 @@ int main(void) {
 // ------------------Functions ------------------
 
 /**
- * Function: RampMotorTo
+ * Function: RampMotorsTo
  * @param LeftTarget, to start ramping the left motor to
  * @param RightSpeed, to start ramping the right motor to
  * @return None
  * @remark Sets the motor speeds to the given speeds without ramping.
  */
-void RampMotorTo(int8 LeftTarget, int8 RightTarget) {
+void RampMotorsTo(int8 LeftTarget, int8 RightTarget) {
     TargetSpeedLeft = LeftTarget;
     TargetSpeedRight = RightTarget;
+    InitTimer(RAMP_TIMER, RAMP_TIME);
 }
 
 /**
@@ -193,7 +199,9 @@ void DoRamp() {
     }
 
     UpdateMotors();
-    InitTimer(RAMP_TIMER, RAMP_SPEED);
+    if (Ramping()) {
+        InitTimer(RAMP_TIMER, RAMP_TIME);
+    }
 }
 
 /**
@@ -240,7 +248,7 @@ void StopMotors() {
  * @remark Turns the roach gradually to the right.
  */
 void TurnRight() {
-    RampMotorTo(5,0);
+    RampMotorsTo(5,0);
 }
 
 
@@ -250,7 +258,7 @@ void TurnRight() {
  * @remark Turns the roach gradually to the left.
  */
 void TurnLeft() {
-    RampMotorTo(0,5);
+    RampMotorsTo(0,5);
 }
 
 
@@ -269,13 +277,13 @@ void MoveBackward() {
  * @remark Moves the roach forward.
  */
 void MoveForward() {
-    RampMotorTo(10,10);
+    RampMotorsTo(10,10);
 }
 
 /**
  * Function: RightBumperCollision
  * @return None
- * @remark Puts the roach into the turning state and turns left. */
+ * @remark Puts the roach into the turning state and turns left.
 void RightBumperCollision() {
     state = reversing;
     StopMotors();
@@ -284,11 +292,12 @@ void RightBumperCollision() {
     // stop turning after timer expires
     InitTimer(MOVEMENT_TIMER, REVERSE_COLLIDE_TIME);
 }
+*/
 
 /**
  * Function: LeftBumperCollision
  * @return None
- * @remark Puts the roach into the turning state and turns right. */
+ * @remark Puts the roach into the turning state and turns right.
 void LeftBumperCollision() {
     state = reversing;
     StopMotors();
@@ -297,12 +306,13 @@ void LeftBumperCollision() {
     // stop turning after timer expires
     InitTimer(MOVEMENT_TIMER, REVERSE_COLLIDE_TIME);
 }
+*/
 
 /**
  * Function: FrontBumpersCollision
  * @return None
  * @remark Puts the roach into the turn state and causes it to move
- *    backward. */
+ *    backward.
 void FrontBumpersCollision() {
     state = reversing;
     StopMotors();
@@ -310,13 +320,14 @@ void FrontBumpersCollision() {
     // stop backing up when timer expires
     InitTimer(MOVEMENT_TIMER, REVERSE_COLLIDE_TIME);
 }
+*/
 
 /**
  * Function: StartRunning
  * @return None
  * @remark Triggers the roach into the running state and moves
  *    forward.
- */
+
 void StartRunning() {
     state = running;
     // set a reference light level to check against later
@@ -326,6 +337,7 @@ void StartRunning() {
     // and changes directions if it's getting brighter
     InitTimer(MOVEMENT_TIMER, FORWARD_CHECK_TIME);
 }
+ * */
 
 /**
  * Function: StartResting
@@ -339,11 +351,37 @@ void StartResting() {
 }
 
 /**
+ * Function: StartResting
+ * @return None
+ * @remark Triggers the roach into the resting state and stops its
+ *    motors
+ */
+void StartReturning() {
+    state = returning;
+    SetMotors(-10,-10);
+    Distance -= RAMP_UP_DISTANCE;
+    InitTimer(UNIT_TIMER, UNIT_TIME);
+}
+
+/**
+ * Function: StartSearching
+ * @return None
+ * @remark
+ */
+void StartSearching() {
+    state = searching;
+    StopMotors();
+    RampMotorsTo(10,10);
+    Distance = 0;
+    DarkestLight = 0;
+    InitTimer(UNIT_TIMER, UNIT_TIME);
+}
+
+/**
  * Function: ChangeDirectionRand
  * @return None
  * @remark Puts the roach into the turning state and causes it to turn
  *    in a random direction.
- */
 void ChangeDirectionRand() {
     state = turning;
     if (CoinFlip()) {
@@ -354,12 +392,13 @@ void ChangeDirectionRand() {
     // stop turning when timer expires
     InitTimer(MOVEMENT_TIMER, CHANGE_DIR_TIME);
 }
+ * /
 /**
  * Function: ChangeDirection
  * @return None
  * @remark Puts the roach into the turning state and causes it to turn
  *    in a random direction.
- */
+ 
 void ChangeDirectionPrev() {
     state = turning;
     if (NextDirection == LEFT) {
@@ -370,6 +409,7 @@ void ChangeDirectionPrev() {
     // stop turning when timer expires
     InitTimer(MOVEMENT_TIMER, CHANGE_DIR_PREV_TIME);
 }
+*/
 
 /**
  * Function: ChangeDirectionAlot
@@ -386,6 +426,16 @@ void ChangeDirectionAlot() {
     }
     // stop turning when timer expires
     InitTimer(MOVEMENT_TIMER, TURN_ALOT_TIME);
+}
+
+/**
+ * Function: Ramping
+ * @return
+ * @remark
+ */
+unsigned char Ramping() {
+    return (CurSpeedLeft == TargetSpeedLeft
+            && CurSpeedRight == TargetSpeedRight);
 }
 
 
@@ -414,8 +464,12 @@ unsigned char IsDark () {
  * @remark Updates the roach's global light levels.
  */
 void UpdateLightLevels() {
-    PrevLight = CurLight;
+    //PrevLight = CurLight;
     CurLight = LightLevel();
+}
+
+void UpdateDistance() {
+    Distance += CurSpeedLeft;
 }
 
 /**
